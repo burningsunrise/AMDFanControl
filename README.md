@@ -4,7 +4,7 @@ This is a .Net core application that takes automatic control of your GPU fans fo
 
 ## Usage
 
-To use, simply copy the git and build for your desired system. You can change any variables you wish the most promenant ones would probably be PrecentageRange and WithinPercentage range, but nothing is necessary to get this to run. After you have built, you can either run manually on your machine, or create a systemd service file like below:
+To use, simply copy the git and build for your desired system, **MUST RUN AS SUDO**. You can change any variables you wish the most promenant ones would probably be PrecentageRange and WithinPercentage range, but nothing is necessary to get this to run. After you have built, you can either run manually on your machine, or create a systemd service file like below:
 
 ```text
 Description=Automatic Fancontrol
