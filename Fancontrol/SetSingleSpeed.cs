@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 namespace Fancontrol
 {
-    class SetSingleSpeed
+    internal class SetSingleSpeed
     {
         public SetSingleSpeed()
         {
@@ -34,11 +34,15 @@ namespace Fancontrol
             {
                 try
                 {
-                    DirectoryNames.Add(Directory.GetDirectories($"{cardDir}/device/hwmon/", "hwmon?")[0]);
+                    
+                    if (Directory.Exists($"{cardDir}/device/hwmon/"))
+                    {
+                        DirectoryNames.Add(Directory.GetDirectories($"{cardDir}/device/hwmon/", "hwmon?")[0]);
+                    }
                 }
-                catch (DirectoryNotFoundException)
+                catch (Exception ex)
                 {
-                    continue;
+                    Console.WriteLine($"Probably picked up integrated gpu: {ex}");
                 }
             }
         }
@@ -64,47 +68,47 @@ namespace Fancontrol
 
         public async Task AutomaticFanControl()
         {
-            foreach (KeyValuePair<string, int> cardInformation in Cards)
+            foreach (var (key, value) in Cards)
             {
-                if (OverHeatingCards.TryGetValue(cardInformation.Key, out DateTime dateTime))
+                if (OverHeatingCards.TryGetValue(key, out var dateTime))
                 {
-                    if (OverHeatingCards[cardInformation.Key] > DateTime.Now)
-                        await SetFanSingleFanSpeed(cardInformation.Key, 100);
-                    else if (OverHeatingCards[cardInformation.Key] <= DateTime.Now)
-                        OverHeatingCards.Remove(cardInformation.Key);
+                    if (OverHeatingCards[key] > DateTime.Now)
+                        await SetFanSingleFanSpeed(key, 100);
+                    else if (OverHeatingCards[key] <= DateTime.Now)
+                        OverHeatingCards.Remove(key);
 
                 }
                 else
                 {
-                    if (cardInformation.Value >= 80)
+                    if (value >= 80)
                     {
-                        await SetFanSingleFanSpeed(cardInformation.Key, 100);
-                        OverHeatingCards[cardInformation.Key] = DateTime.Now.AddHours(1);
+                        await SetFanSingleFanSpeed(key, 100);
+                        OverHeatingCards[key] = DateTime.Now.AddHours(1);
                     }
-                    else if (cardInformation.Value >= 75)
-                        await SetFanSingleFanSpeed(cardInformation.Key, 100);
-                    else if (cardInformation.Value >= 70)
-                        await SetFanSingleFanSpeed(cardInformation.Key, 95);
-                    else if (cardInformation.Value >= 65)
-                        await SetFanSingleFanSpeed(cardInformation.Key, 85);
-                    else if (cardInformation.Value >= 55)
-                        await SetFanSingleFanSpeed(cardInformation.Key, 80);
-                    else if (cardInformation.Value >= 50)
-                        await SetFanSingleFanSpeed(cardInformation.Key, 75);
-                    else if (cardInformation.Value >= 40)
-                        await SetFanSingleFanSpeed(cardInformation.Key, 70);
-                    else if (cardInformation.Value >= 35)
-                        await SetFanSingleFanSpeed(cardInformation.Key, 55);
-                    else if (cardInformation.Value >= 30)
-                        await SetFanSingleFanSpeed(cardInformation.Key, 20);
+                    else if (value >= 75)
+                        await SetFanSingleFanSpeed(key, 100);
+                    else if (value >= 70)
+                        await SetFanSingleFanSpeed(key, 95);
+                    else if (value >= 65)
+                        await SetFanSingleFanSpeed(key, 85);
+                    else if (value >= 55)
+                        await SetFanSingleFanSpeed(key, 80);
+                    else if (value >= 50)
+                        await SetFanSingleFanSpeed(key, 75);
+                    else if (value >= 40)
+                        await SetFanSingleFanSpeed(key, 70);
+                    else if (value >= 35)
+                        await SetFanSingleFanSpeed(key, 55);
+                    else if (value >= 30)
+                        await SetFanSingleFanSpeed(key, 20);
                     else
-                        await SetFanSingleFanSpeed(cardInformation.Key, 100);
+                        await SetFanSingleFanSpeed(key, 100);
                 }
 
             }
         }
 
-        private async Task SetFanSingleFanSpeed(string card, int speed)
+        public async Task SetFanSingleFanSpeed(string card, int speed)
         {
             try
             {
@@ -126,14 +130,23 @@ namespace Fancontrol
                 }
                 using (StreamReader reader = File.OpenText(card + "/pwm1"))
                 {
-                    int fileFanSpeed = Convert.ToInt32(await reader.ReadLineAsync());
-                    if (!WithinPercent(FanSpeed, fileFanSpeed, speed) && fileFanSpeed != FanSpeed)
+                    try
                     {
-                        using (StreamWriter writer = File.CreateText(card + "/pwm1"))
+                        var fileFanSpeed = Convert.ToInt32(await reader.ReadLineAsync());
+                        if (!WithinPercent(FanSpeed, fileFanSpeed, speed) && fileFanSpeed != FanSpeed)
                         {
-                            char[] charFanSpeed = FanSpeed.ToString().ToCharArray();
-                            await writer.WriteAsync(charFanSpeed, 0, charFanSpeed.Length);
+                            using (StreamWriter writer = File.CreateText(card + "/pwm1"))
+                            {
+                                char[] charFanSpeed = FanSpeed.ToString().ToCharArray();
+                                await writer.WriteAsync(charFanSpeed, 0, charFanSpeed.Length);
+                            }
                         }
+                        
+                    }
+                    catch (Exception)
+                    {
+                        // Catching no device errors from reader.ReadLineAsync() when a fan is not present
+                        // pwm1 doesn't play well with no fans present
                     }
                 }
             }
@@ -143,17 +156,65 @@ namespace Fancontrol
             }
         }
 
+        public async Task SetAllFanSpeed(int speed)
+        {
+            foreach (var card in DirectoryNames)
+            {
+                try
+                {
+                    using (StreamReader reader = File.OpenText(card + "/pwm1_max"))
+                    {
+                        FanMax = Convert.ToInt32(await reader.ReadLineAsync());
+                    }
+                    FanSpeed = (Convert.ToInt32(FanMax * speed)) / 100;
+
+                    using (StreamReader reader = File.OpenText(card + "/pwm1_enable"))
+                    {
+                        if (await reader.ReadLineAsync() != "1")
+                        {
+                            using (StreamWriter writer = File.CreateText(card + "/pwm1_enable"))
+                            {
+                                await writer.WriteAsync("1");
+                            }
+                        }
+                    }
+                    using (StreamReader reader = File.OpenText(card + "/pwm1"))
+                    {
+                        try
+                        {
+                            var fileFanSpeed = Convert.ToInt32(await reader.ReadLineAsync());
+                            if (!WithinPercent(FanSpeed, fileFanSpeed, speed) && fileFanSpeed != FanSpeed)
+                            {
+                                using (StreamWriter writer = File.CreateText(card + "/pwm1"))
+                                {
+                                    char[] charFanSpeed = FanSpeed.ToString().ToCharArray();
+                                    await writer.WriteAsync(charFanSpeed, 0, charFanSpeed.Length);
+                                }
+                            }
+                        }
+                        catch (Exception)
+                        {
+                            // Catching no device errors from reader.ReadLineAsync() when a fan is not present
+                            // pwm1 doesn't play well with no fans present
+                        }
+                    }
+                }
+
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"There was an error setting all fan speeds: {ex}");
+                }
+            }
+        }
+
         private bool WithinPercent(int num1, int num2, int speed)
         {
-            double firstPercentage = ((double)num1 / 100) * PercentageRange;
-            double secondPercentage = ((double)num2 / 100) * PercentageRange;
-            double final = ((Math.Abs(firstPercentage - secondPercentage)) / firstPercentage) * 100;
+            var firstPercentage = ((double)num1 / 100) * PercentageRange;
+            var secondPercentage = ((double)num2 / 100) * PercentageRange;
+            var final = ((Math.Abs(firstPercentage - secondPercentage)) / firstPercentage) * 100;
             if (speed >= 85)
                 return false;
-            if (final <= PercentageRange)
-                return true;
-            else
-                return false;
+            return final <= PercentageRange;
         }
     }
 }
